@@ -1,157 +1,111 @@
-{
- "cells": [
-  {
-   "cell_type": "code",
-   "execution_count": null,
-   "metadata": {},
-   "outputs": [
-    {
-     "name": "stdout",
-     "output_type": "stream",
-     "text": [
-      "pass\n",
-      "error: not positive definite\n",
-      "pass\n",
-      "pass\n",
-      "pass\n",
-      "pass\n"
-     ]
-    }
-   ],
-   "source": [
-    "#!/usr/bin/env python\n",
-    "\n",
-    "from numpy import exp, dot, pi, inf, isclose, array, sum\n",
-    "from scipy.linalg import cholesky, LinAlgError, solve_triangular, inv\n",
-    "from scipy.integrate import nquad\n",
-    "\n",
-    "# a\n",
-    "def integrand(v, a, w, p=0):\n",
-    "\tv = array(v)\n",
-    "\treturn exp(-dot(v, dot(a, v))/2 + dot(v, w)) * (v**p).prod()\n",
-    "\n",
-    "# Using Cholesky decomposition is a bit faster than using inv directly.\n",
-    "def true_integral(a, w):\n",
-    "\tl = cholesky(a, lower=True)\n",
-    "\tdet_l = l.diagonal().prod()\n",
-    "\tinv_l_w = solve_triangular(l, w, lower=True)\n",
-    "\treturn (2*pi)**(len(w)/2)/det_l*exp(dot(inv_l_w, inv_l_w)/2)\n",
-    "\n",
-    "def num_integral(a, w):\n",
-    "\treturn nquad(\n",
-    "\t\tlambda *args: integrand(args[:-2], *args[-2:]),\n",
-    "\t\t[(-inf, inf)]*len(w),\n",
-    "\t\targs=(a, w)\n",
-    "\t)[0]\n",
-    "\n",
-    "def verify(a, w):\n",
-    "\ttry:\n",
-    "\t\texpected = true_integral(a, w)\n",
-    "\t\tgot = num_integral(a, w)\n",
-    "\texcept LinAlgError:\n",
-    "\t\tprint(\"error: not positive definite\")\n",
-    "\t\treturn\n",
-    "\tif isclose(expected, got):\n",
-    "\t\tprint(\"pass\")\n",
-    "\telse:\n",
-    "\t\tprint(f\"fail: analytic {expected}, numerical {got}\")\n",
-    "\n",
-    "# b\n",
-    "A = [[4,2,1],[2,5,3],[1,3,6]]\n",
-    "W = [1,2,3]\n",
-    "verify(A, W) # correct\n",
-    "verify([[4,2,1],[2,1,3],[1,3,6]], W) # not positive definite\n",
-    "\n",
-    "# c\n",
-    "# len(var) must be even number.\n",
-    "# For each possible way of pairing elements in var,\n",
-    "# multiply the corresponding elements in s.\n",
-    "# Then sum all the products.\n",
-    "# e.g. pairing(s, [1,2,3,4]) = s[1,2] s[3,4] + s[1,3] s[2,4] + s[1,4] s[2,3]\n",
-    "def pairing(s, var):\n",
-    "\torder = len(var)\n",
-    "\tif order == 0:\n",
-    "\t\treturn 1\n",
-    "\tresult = 0\n",
-    "\tfor i in range(1, order):\n",
-    "\t\tresult += s[var[0], var[i]] * pairing(s, var[1:i] + var[i+1:])\n",
-    "\treturn result\n",
-    "\n",
-    "# For multivariate normal distribution with covariance matrix s and mean vector mu,\n",
-    "# calculate the moments specified by var.\n",
-    "# c specifies whether the corresponding element in var represents a variable shifted by its mean.\n",
-    "# e.g. var = [1,2,2] and c = [F,T,F] means the expectation value <v1 (v2-mu2) v2>.\n",
-    "def wick(s, mu, var, c=None):\n",
-    "\tm = len(var)\n",
-    "\tif m == 0:\n",
-    "\t\treturn 1\n",
-    "\tif c is None:\n",
-    "\t\tc = [False]*m\n",
-    "\tresult = 0\n",
-    "\tfor i in range(m):\n",
-    "\t\tif c[i]:\n",
-    "\t\t\tcontinue\n",
-    "\t\tc[i] = True\n",
-    "\t\tresult += mu[var[i]] * wick(s, mu, var[:i] + var[i+1:], c[:i] + c[i+1:])\n",
-    "\tif m % 2 == 0 and all(c):\n",
-    "\t\tresult += pairing(s, var)\n",
-    "\treturn result\n",
-    "\n",
-    "def true_moment(a, w, p):\n",
-    "\ts = inv(a)\n",
-    "\tvar = []\n",
-    "\tfor i, pi in enumerate(p):\n",
-    "\t\tvar += [i]*pi\n",
-    "\treturn wick(s, dot(s, w), var)\n",
-    "\n",
-    "def num_moment(a, w, p):\n",
-    "\treturn nquad(\n",
-    "\t\tlambda *args: integrand(args[:-3], *args[-3:]),\n",
-    "\t\t[(-inf, inf)]*len(w),\n",
-    "\t\targs=(a, w, p)\n",
-    "\t)[0] / num_integral(a, w)\n",
-    "def verify_moment(a, w, p):\n",
-    "\texpected = true_moment(a, w, p)\n",
-    "\tgot = num_moment(a, w, p)\n",
-    "\tif isclose(expected, got):\n",
-    "\t\tprint(\"pass\")\n",
-    "\telse:\n",
-    "\t\tprint(f\"fail: analytic {expected}, numerical {got}\")\n",
-    "\n",
-    "# In the comments, I give closed-form expressions for the moments.\n",
-    "# Below, S means A^-1, and mu means A^-1 w.\n",
-    "verify_moment(A, W, [1,0,0]) # mu1\n",
-    "verify_moment(A, W, [0,1,0]) # mu2\n",
-    "verify_moment(A, W, [0,0,1]) # mu3\n",
-    "verify_moment(A, W, [1,1,0]) # S12 + mu1 mu2\n",
-    "verify_moment(A, W, [0,1,1]) # S23 + mu2 mu3\n",
-    "verify_moment(A, W, [1,0,1]) # S13 + mu1 mu3\n",
-    "verify_moment(A, W, [2,1,0]) # 2 mu1 S12 + mu2 S11 + mu1^2 mu2\n",
-    "verify_moment(A, W, [0,1,2]) # 2 mu3 S23 + mu2 S33 + mu2 mu3^3\n",
-    "verify_moment(A, W, [2,2,0]) # (S11 + mu1^2) (S22 + mu2^2) + 2 S12^2\n",
-    "verify_moment(A, W, [0,2,2]) # (S22 + mu2^2) (S33 + mu3^2) + 2 S23^2"
-   ]
-  }
- ],
- "metadata": {
-  "kernelspec": {
-   "display_name": "Python 3",
-   "language": "python",
-   "name": "python3"
-  },
-  "language_info": {
-   "codemirror_mode": {
-    "name": "ipython",
-    "version": 3
-   },
-   "file_extension": ".py",
-   "mimetype": "text/x-python",
-   "name": "python",
-   "nbconvert_exporter": "python",
-   "pygments_lexer": "ipython3",
-   "version": "3.8.10"
-  }
- },
- "nbformat": 4,
- "nbformat_minor": 2
-}
+#!/usr/bin/env python
+
+from numpy import exp, dot, pi, inf, isclose, array, sum
+from scipy.linalg import cholesky, LinAlgError, solve_triangular, inv
+from scipy.integrate import nquad
+
+# a
+def integrand(v, a, w, p=0):
+	v = array(v)
+	return exp(-dot(v, dot(a, v))/2 + dot(v, w)) * (v**p).prod()
+
+# Using Cholesky decomposition is a bit faster than using inv directly.
+def true_integral(a, w):
+	l = cholesky(a, lower=True)
+	det_l = l.diagonal().prod()
+	inv_l_w = solve_triangular(l, w, lower=True)
+	return (2*pi)**(len(w)/2)/det_l*exp(dot(inv_l_w, inv_l_w)/2)
+
+def num_integral(a, w):
+	return nquad(
+		lambda *args: integrand(args[:-2], *args[-2:]),
+		[(-inf, inf)]*len(w),
+		args=(a, w)
+	)[0]
+
+def verify(a, w):
+	try:
+		expected = true_integral(a, w)
+		got = num_integral(a, w)
+	except LinAlgError:
+		print("error: not positive definite")
+		return
+	if isclose(expected, got):
+		print("pass")
+	else:
+		print(f"fail: analytic {expected}, numerical {got}")
+
+# b
+A = [[4,2,1],[2,5,3],[1,3,6]]
+W = [1,2,3]
+verify(A, W) # correct
+verify([[4,2,1],[2,1,3],[1,3,6]], W) # not positive definite
+
+# c
+# len(var) must be even number.
+# For each possible way of pairing elements in var,
+# multiply the corresponding elements in s.
+# Then sum all the products.
+# e.g. pairing(s, [1,2,3,4]) = s[1,2] s[3,4] + s[1,3] s[2,4] + s[1,4] s[2,3]
+def pairing(s, var):
+	order = len(var)
+	if order == 0:
+		return 1
+	result = 0
+	for i in range(1, order):
+		result += s[var[0], var[i]] * pairing(s, var[1:i] + var[i+1:])
+	return result
+
+# For multivariate normal distribution with covariance matrix s and mean vector mu,
+# calculate the moments specified by var.
+# c specifies whether the corresponding element in var represents a variable shifted by its mean.
+# e.g. var = [1,2,2] and c = [F,T,F] means the expectation value <v1 (v2-mu2) v2>.
+def wick(s, mu, var, c=None):
+	m = len(var)
+	if m == 0:
+		return 1
+	if c is None:
+		c = [False]*m
+	result = 0
+	for i in range(m):
+		if c[i]:
+			continue
+		c[i] = True
+		result += mu[var[i]] * wick(s, mu, var[:i] + var[i+1:], c[:i] + c[i+1:])
+	if m % 2 == 0 and all(c):
+		result += pairing(s, var)
+	return result
+
+def true_moment(a, w, p):
+	s = inv(a)
+	var = []
+	for i, pi in enumerate(p):
+		var += [i]*pi
+	return wick(s, dot(s, w), var)
+
+def num_moment(a, w, p):
+	return nquad(
+		lambda *args: integrand(args[:-3], *args[-3:]),
+		[(-inf, inf)]*len(w),
+		args=(a, w, p)
+	)[0] / num_integral(a, w)
+def verify_moment(a, w, p):
+	expected = true_moment(a, w, p)
+	got = num_moment(a, w, p)
+	if isclose(expected, got):
+		print("pass")
+	else:
+		print(f"fail: analytic {expected}, numerical {got}")
+
+# In the comments, I give closed-form expressions for the moments.
+# Below, S means A^-1, and mu means A^-1 w.
+verify_moment(A, W, [1,0,0]) # mu1
+verify_moment(A, W, [0,1,0]) # mu2
+verify_moment(A, W, [0,0,1]) # mu3
+verify_moment(A, W, [1,1,0]) # S12 + mu1 mu2
+verify_moment(A, W, [0,1,1]) # S23 + mu2 mu3
+verify_moment(A, W, [1,0,1]) # S13 + mu1 mu3
+verify_moment(A, W, [2,1,0]) # 2 mu1 S12 + mu2 S11 + mu1^2 mu2
+verify_moment(A, W, [0,1,2]) # 2 mu3 S23 + mu2 S33 + mu2 mu3^3
+verify_moment(A, W, [2,2,0]) # (S11 + mu1^2) (S22 + mu2^2) + 2 S12^2
+verify_moment(A, W, [0,2,2]) # (S22 + mu2^2) (S33 + mu3^2) + 2 S23^2
